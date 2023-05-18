@@ -1,1 +1,1 @@
-# Monte-Carlo-comMalaria-Epidemic-simulated-with-stochastic-algorithm-and-monte-carlo
+# Simulating Malaria Epidemic with Monte Carlo and Stochastic Simulation Algorithm
