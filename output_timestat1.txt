@@ -1,0 +1,2 @@
+checkpoint-25,checkpoint-50,checkpoint-75,checkpoint-100
+rank-0,1.083095,1.502431,1.809103,2.112829

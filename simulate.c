@@ -147,7 +147,6 @@ int main(int argc, char *argv[])
             {
                 // Accumulate time_elapse into the time_array
                 time_run = MPI_Wtime() - time_elapse;
-                // Convert to milliseconds and average it
                 accumulate_time(&window, &time_run, time_counter, size, rank, driver_rank);
                 time_counter++;
             }
@@ -197,20 +196,10 @@ int main(int argc, char *argv[])
 
         // Accumulate time_elapse into the time_array
         time_run = MPI_Wtime() - time_elapse;
-        // Convert to milliseconds and average it
         accumulate_time(&window, &time_run, time_counter, size, rank, driver_rank);
     }
 
     /* Gather information about the run */
-
-    // Convert the times to milliseconds and average it
-    if (rank == driver_rank)
-    {
-        for (int i = 0; i < times_array_size; i++)
-        {
-            time_array[i] *= 1000 / runs_per_process;
-        }
-    }
 
     // Find bin values
     int local_min = INT_MAX;
@@ -220,6 +209,7 @@ int main(int argc, char *argv[])
     // Find local min and max for the bins
     for (int i = 0; i < runs_per_process; i++)
     {
+        // susceptible humans, first component of x (simulation_states)
         local_susceptible[i] = simulation_states[0][i];
 
         if (local_min > local_susceptible[i])
@@ -249,11 +239,12 @@ int main(int argc, char *argv[])
     global_frequencies = (int *)calloc(bin_amount, sizeof(int));
 
     // Create the bin intervals
-    for (int i = 0; i < bin_amount + 1; i++)
+    for (int i = 0; i <= bin_amount; i++)
     {
         global_bins[i] = global_min + i * bin_size;
-        if (i == bin_amount + 1)
+        if (i == bin_amount)
         {
+            // Set max
             global_bins[i] = global_max;
         }
     }
@@ -262,6 +253,12 @@ int main(int argc, char *argv[])
     {
         // Locate the index of the bin
         bin_index = (local_susceptible[i] - global_min) / bin_size;
+
+        // Fix out of bounds
+        if (bin_index >= bin_amount) 
+        {
+            bin_index = bin_amount - 1;
+        }
 
         // Increment the bin
         local_frequencies[bin_index] += 1;
@@ -274,6 +271,15 @@ int main(int argc, char *argv[])
     end_time = MPI_Wtime() - start_time;
     double max_time;
     MPI_Reduce(&end_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    // Convert the times to milliseconds and average it
+    if (rank == driver_rank)
+    {
+        for (int i = 0; i < times_array_size; i++)
+        {
+            time_array[i] *= 1000.0 / runs_per_process;
+        }
+    }
 
     // Print time
     if (rank == driver_rank)
@@ -337,11 +343,11 @@ int main(int argc, char *argv[])
             {
                 if (time_idx == checkpoint_size - 1)
                 {
-                    fprintf(file2, "%.2f", time_array[rank_idx + time_idx * size]);
+                    fprintf(file2, "%.6f", time_array[rank_idx + time_idx * size]);
                 }
                 else
                 {
-                    fprintf(file2, "%.2f,", time_array[rank_idx + time_idx * size]);
+                    fprintf(file2, "%.6f,", time_array[rank_idx + time_idx * size]);
                 }
             }
             fprintf(file2, "\n");
