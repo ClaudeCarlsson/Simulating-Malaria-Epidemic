@@ -1,4 +1,5 @@
-/* Made by Claude Carlsson */
+/* Made by Claude Carlsson 2023*/
+// Run with mpirun --bind-to none -np 2 ./simulate 10 output_histogram.csv output_timestat.txt
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +58,7 @@ int main(int argc, char *argv[])
     {
         if (argc != 4)
         {
-            printf("Usage: ./simulate <N> <output_file> <print_info>\n");
+            printf("Usage: ./simulate <N> <output_file_histogram> <output_file_timestat>\n");
             return 1;
         }
     }
@@ -69,15 +70,15 @@ int main(int argc, char *argv[])
 
     // Input values
     int N = atoi(argv[1]);
-    char *output_file = argv[2];
-    int print_info = atoi(argv[3]);
+    char *output_file_histogram = argv[2];
+    char *output_file_timestat = argv[3];
 
     // Dimension/Amount values
     int P_row = 15;
     int P_col = 7;
     int w_size = P_row;
     int checkpoint_size = 4;
-    int bins_amount = 20;
+    int bin_amount = 20;
     int runs_per_process = N / size;
     int times_array_size = size * checkpoint_size;
 
@@ -147,7 +148,6 @@ int main(int argc, char *argv[])
                 // Accumulate time_elapse into the time_array
                 time_run = MPI_Wtime() - time_elapse;
                 // Convert to milliseconds and average it
-                time_run = time_run * 1000 / runs_per_process;
                 accumulate_time(&window, &time_run, time_counter, size, rank, driver_rank);
                 time_counter++;
             }
@@ -198,11 +198,21 @@ int main(int argc, char *argv[])
         // Accumulate time_elapse into the time_array
         time_run = MPI_Wtime() - time_elapse;
         // Convert to milliseconds and average it
-        time_run = time_run * 1000 / runs_per_process;
         accumulate_time(&window, &time_run, time_counter, size, rank, driver_rank);
     }
 
     /* Gather information about the run */
+
+    // Convert the times to milliseconds and average it
+    if (rank == driver_rank)
+    {
+        for (int i = 0; i < times_array_size; i++)
+        {
+            time_array[i] *= 1000 / runs_per_process;
+        }
+    }
+
+    // Find bin values
     int local_min = INT_MAX;
     int local_max = INT_MIN;
     int *local_susceptible = (int *)calloc(runs_per_process, sizeof(int));
@@ -223,27 +233,26 @@ int main(int argc, char *argv[])
     }
 
     /* Prepare and create a histogram */
-    double interval;
     int *global_bins, *local_frequencies, *global_frequencies;
-    int global_min, global_max, bin_index;
+    int global_min, global_max, bin_index, bin_size;
 
     // Find global min and max for the bins
     MPI_Allreduce(&local_min, &global_min, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
     MPI_Allreduce(&local_max, &global_max, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    // Create interval
-    interval = (double)(global_max - global_min) / bins_amount;
+    // Calculate the bin size
+    bin_size = (int)(global_max - global_min) / bin_amount;
 
     // Create local histograms
-    global_bins = (int *)calloc(bins_amount + 1, sizeof(int));
-    local_frequencies = (int *)calloc(bins_amount, sizeof(int));
-    global_frequencies = (int *)calloc(bins_amount, sizeof(int));
+    global_bins = (int *)calloc(bin_amount + 1, sizeof(int));
+    local_frequencies = (int *)calloc(bin_amount, sizeof(int));
+    global_frequencies = (int *)calloc(bin_amount, sizeof(int));
 
     // Create the bin intervals
-    for (int i = 0; i < bins_amount + 1; i++)
+    for (int i = 0; i < bin_amount + 1; i++)
     {
-        global_bins[i] = global_min + i * interval;
-        if (i == bins_amount + 1)
+        global_bins[i] = global_min + i * bin_size;
+        if (i == bin_amount + 1)
         {
             global_bins[i] = global_max;
         }
@@ -252,79 +261,100 @@ int main(int argc, char *argv[])
     for (int i = 0; i < runs_per_process; i++)
     {
         // Locate the index of the bin
-        bin_index = (local_susceptible[i] - global_min) / interval;
+        bin_index = (local_susceptible[i] - global_min) / bin_size;
 
         // Increment the bin
         local_frequencies[bin_index] += 1;
     }
 
     // Combine the local histograms
-    MPI_Reduce(local_frequencies, global_frequencies, bins_amount, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(local_frequencies, global_frequencies, bin_amount, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
 
     /* Prepare to print statistics */
     end_time = MPI_Wtime() - start_time;
     double max_time;
     MPI_Reduce(&end_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
-    // Print time statistics
-    if (rank == driver_rank && print_info == 1)
-    {
-        printf("\n-------- Information --------\n\n");
-        printf("Longest process time: %.2lf\n\n", max_time);
-        printf("The average checkpoint times (milliseconds)\n");
-
-        // Print header line with checkpoint labels
-        printf("\t\t");
-        for (int i = 0; i < checkpoint_size; ++i)
-        {
-            printf("chkp %d\t\t", time_checkpoints[i]);
-        }
-        printf("\n");
-        // For each rank, print the rank and then the time for each checkpoint
-        for (int rank_idx = 0; rank_idx < size; rank_idx++)
-        {
-            printf("Rank %d\t\t", rank_idx);
-
-            for (int time_idx = 0; time_idx < checkpoint_size; time_idx++)
-            {
-                printf("%.3f\t\t", time_array[rank_idx + time_idx * size]);
-            }
-
-            printf("\n");
-        }
-    }
-    // Print only time
-    if (rank == driver_rank && print_info == 2)
+    // Print time
+    if (rank == driver_rank)
     {
         printf("%lf\n", max_time);
     }
 
-    // Write histogram to file
+    // Write histogram and timestat to file
     if (rank == driver_rank)
     {
-        FILE *file = fopen(output_file, "w");
+        FILE *file1 = fopen(output_file_histogram, "w");
 
         // Check if the file was opened successfully
-        if (file == NULL)
+        if (file1 == NULL)
         {
             printf("Error opening output file\n");
             return 1;
         }
 
         // Print histogram bins and frequencies
-        fprintf(file, "bin,amount\n");
-        for (int i = 0; i < bins_amount; i++)
+        fprintf(file1, "bin,amount\n");
+        for (int i = 0; i < bin_amount; i++)
         {
-            fprintf(file, "%d,%d\n", global_bins[i], global_frequencies[i]);
+            fprintf(file1, "%d,%d\n", global_bins[i], global_frequencies[i]);
         }
 
         // Close the file
-        int result = fclose(file);
-        if (result == EOF)
+        int result1 = fclose(file1);
+        if (result1 == EOF)
         {
             printf("Error closing output file\n");
             return 1;
         }
+
+        FILE *file2 = fopen(output_file_timestat, "w");
+
+        // Check if the file was opened successfully
+        if (file2 == NULL)
+        {
+            printf("Error opening output file\n");
+            return 1;
+        }
+        for (int i = 0; i < checkpoint_size; i++)
+        {
+            if (i == checkpoint_size - 1)
+            {
+                fprintf(file2, "checkpoint-%d", time_checkpoints[i]);
+            }
+            else
+            {
+                fprintf(file2, "checkpoint-%d,", time_checkpoints[i]);
+            }
+        }
+        fprintf(file2, "\n");
+
+        // For each rank, print the rank and then the time for each checkpoint
+        for (int rank_idx = 0; rank_idx < size; rank_idx++)
+        {
+            fprintf(file2, "rank-%d,", rank_idx);
+            for (int time_idx = 0; time_idx < checkpoint_size; time_idx++)
+            {
+                if (time_idx == checkpoint_size - 1)
+                {
+                    fprintf(file2, "%.2f", time_array[rank_idx + time_idx * size]);
+                }
+                else
+                {
+                    fprintf(file2, "%.2f,", time_array[rank_idx + time_idx * size]);
+                }
+            }
+            fprintf(file2, "\n");
+        }
+
+        // Close the file
+        int result2 = fclose(file2);
+        if (result2 == EOF)
+        {
+            printf("Error closing output file\n");
+            return 1;
+        }
+
     }
 
     // Free all allocated memory
