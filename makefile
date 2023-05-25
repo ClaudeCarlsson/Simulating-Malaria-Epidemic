@@ -1,15 +1,33 @@
+# Compiler (use mpicc which is the MPI C compiler wrapper)
 CC = mpicc
-CFLAGS = -O3 -Wall -Wextra
-TARGET = simulate
-OBJS = simulate.o
 
-all: $(TARGET)
+# Compiler flags
+CFLAGS = -Wall -Wextra -O3
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+# Math library
+LIBS = -lm
 
+# Name of the executable
+EXE = simulate
+
+# Source files
+SRC = simulate.c prop.c
+
+# Object files
+OBJ = $(SRC:.c=.o)
+
+# Default target
+all: $(EXE)
+
+# Link object files into the executable
+$(EXE): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+
+# Compile source files into object files
 %.o: %.c
-	$(CC) $(CFLAGS) -c $<
+	$(CC) $(CFLAGS) -c -o $@ $<
 
+# Clean up object files and the executable
+.PHONY: clean
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJ) $(EXE)
