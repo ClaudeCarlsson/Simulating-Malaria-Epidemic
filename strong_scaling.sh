@@ -10,8 +10,6 @@ module load gcc openmpi
 
 echo "Simulating malaria"
 
-mpirun --bind-to none -n 16 ./simulate 1000000 output_histogram_1mil.csv output_timestat_1mil.txt
-mpirun --bind-to none -n 16 ./simulate 2000000 output_histogram_2mil.csv output_timestat_2mil.txt
-mpirun --bind-to none -n 16 ./simulate 4000000 output_histogram_4mil.csv output_timestat_4mil.txt
 
+mpirun --bind-to none -n 16 ./simulate 3000000 output_histogram_3mil.csv output_timestat_3mil.txt
 echo "Complete"
